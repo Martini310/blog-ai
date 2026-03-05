@@ -1,0 +1,140 @@
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# Shared configuration anchors
+# ---------------------------------------------------------------------------
+x-app-env: &app-env
+  env_file: .env
+  environment:
+    - DATABASE_URL=${DATABASE_URL}
+    - REDIS_URL=${REDIS_URL}
+    - JWT_SECRET=${JWT_SECRET}
+    - SENTRY_DSN=${SENTRY_DSN}
+    - ENVIRONMENT=${ENVIRONMENT:-development}
+
+x-app-base: &app-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: runtime
+  <<: *app-env
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  networks:
+    - blog-ai-net
+  restart: unless-stopped
+
+# ---------------------------------------------------------------------------
+# Services
+# ---------------------------------------------------------------------------
+services:
+
+  # ---------- PostgreSQL ----------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: blog-ai-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-blogai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-blogai}
+      POSTGRES_DB: ${POSTGRES_DB:-blogai}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - blog-ai-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-blogai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------- Redis ---------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: blog-ai-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - blog-ai-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------- API (FastAPI) -------------------------------------------------
+  api:
+    <<: *app-base
+    container_name: blog-ai-api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount source for hot-reload in development only
+      - ./app:/app/app:ro
+    labels:
+      - "traefik.enable=true"
+
+  # ---------- Celery Worker -------------------------------------------------
+  celery-worker:
+    <<: *app-base
+    container_name: blog-ai-celery-worker
+    command: >
+      celery -A app.tasks.celery_app.celery_app worker
+      --loglevel=info
+      --queues=default,generation,scheduler
+      --concurrency=4
+      --hostname=worker@%h
+    volumes:
+      - ./app:/app/app:ro
+
+  # ---------- Celery Beat ---------------------------------------------------
+  celery-beat:
+    <<: *app-base
+    container_name: blog-ai-celery-beat
+    command: >
+      celery -A app.tasks.celery_app.celery_app beat
+      --loglevel=info
+      --scheduler celery.beat.PersistentScheduler
+      --schedule /tmp/celerybeat-schedule
+    volumes:
+      - ./app:/app/app:ro
+      - celerybeat_data:/tmp
+
+  # ---------- Flower (Celery monitoring UI) ---------------------------------
+  flower:
+    <<: *app-base
+    container_name: blog-ai-flower
+    command: >
+      celery -A app.tasks.celery_app.celery_app flower
+      --port=5555
+      --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin}
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - celery-worker
+
+# ---------------------------------------------------------------------------
+# Volumes
+# ---------------------------------------------------------------------------
+volumes:
+  postgres_data:
+  redis_data:
+  celerybeat_data:
+
+# ---------------------------------------------------------------------------
+# Network – all services share one isolated bridge network
+# ---------------------------------------------------------------------------
+networks:
+  blog-ai-net:
+    driver: bridge
