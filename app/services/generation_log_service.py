@@ -24,7 +24,7 @@ class GenerationLogService:
     async def record(self, entry: GenerationLogCreate) -> GenerationLog:
         """Persist one generation log entry."""
         log = GenerationLog(
-            **entry.model_dump(),
+            **entry.model_dump(exclude={"request_id"}),
             request_id=entry.request_id or get_request_id() or None,
         )
         self._db.add(log)
