@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     # Feature flags / limits
     # -------------------------------------------------------------------------
     MAX_PROJECTS_FREE_TIER: int = 3
+    MAX_ARTICLES_PER_MONTH_FREE_TIER: int = 20
     MAX_TOPICS_PER_PROJECT: int = 50
 
 

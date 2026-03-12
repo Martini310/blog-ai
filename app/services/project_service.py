@@ -10,10 +10,13 @@ import sentry_sdk
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings as app_settings
 from app.core.logging import get_logger, set_project_id
 from app.models.project import Project
 from app.schemas.project import ProjectCreate, ProjectUpdate
+from app.services.subscription_limit_service import (
+    SubscriptionLimitExceededError,
+    SubscriptionLimitService,
+)
 
 logger = get_logger(__name__)
 
@@ -61,22 +64,14 @@ class ProjectService:
 
     async def create(self, owner_id: uuid.UUID, payload: ProjectCreate) -> Project:
         """
-        Enforce free-tier project limit before creating.
+        Enforce plan-based project limit before creating.
         Actual LLM operations are triggered as Celery tasks – not here.
         """
         try:
-            count_stmt = select(Project).where(
-                Project.owner_id == owner_id,
-                Project.status != "archived",
-            )
-            existing = await self._db.scalars(count_stmt)
-            count = len(list(existing))
-
-            # TODO: check subscription plan limits instead of hard-coded value
-            if count >= app_settings.MAX_PROJECTS_FREE_TIER:
-                raise ProjectLimitExceededError(
-                    f"Free tier allows max {app_settings.MAX_PROJECTS_FREE_TIER} projects."
-                )
+            try:
+                await SubscriptionLimitService(self._db).ensure_project_creation_allowed(owner_id)
+            except SubscriptionLimitExceededError as exc:
+                raise ProjectLimitExceededError(str(exc)) from exc
 
             project = Project(
                 owner_id=owner_id,

@@ -10,14 +10,19 @@ stub shows the correct pattern without inventing dependencies).
 """
 import asyncio
 import uuid
+from datetime import UTC, datetime
 
 import sentry_sdk
 from celery import Task
+from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.logging import get_logger, set_project_id, set_task_name, set_topic_id
+from app.models.content import Topic
+from app.schemas.generation_log import GenerationLogCreate
 from app.services.article_generation_service import ArticleGenerationService
-from app.services.generation_log_service import timed_generation_step
+from app.services.generation_log_service import GenerationLogService, timed_generation_step
+from app.services.subscription_limit_service import SubscriptionLimitService
 from app.tasks.celery_app import celery_app
 
 logger = get_logger(__name__)
@@ -100,6 +105,57 @@ async def _generate_article_async(
     outside of a FastAPI request context (no dependency injection).
     """
     async with get_db() as db:
+        limit_service = SubscriptionLimitService(db)
+        quota = await limit_service.get_article_quota_status(user_id, now=datetime.now(UTC))
+        if not quota.allowed:
+            topic = await db.scalar(
+                select(Topic).where(
+                    Topic.id == topic_id,
+                    Topic.project_id == project_id,
+                )
+            )
+            if topic and topic.status == "in_progress":
+                topic.status = "queued"
+                await db.flush()
+
+            await GenerationLogService(db).record(
+                GenerationLogCreate(
+                    user_id=user_id,
+                    project_id=project_id,
+                    topic_id=topic_id,
+                    request_id=request_id,
+                    task_name="generate_article",
+                    step="subscription_limit_check",
+                    status="failed",
+                    error_message="Monthly article limit exceeded.",
+                    extra={
+                        "plan_slug": quota.plan_slug,
+                        "used_articles": quota.used_articles,
+                        "max_articles": quota.max_articles,
+                        "remaining_articles": quota.remaining_articles,
+                        "period_start": quota.period_start.isoformat(),
+                        "period_end": quota.period_end.isoformat(),
+                    },
+                )
+            )
+            logger.info(
+                "article_generation_blocked_by_subscription_limit",
+                topic_id=str(topic_id),
+                project_id=str(project_id),
+                user_id=str(user_id),
+                used_articles=quota.used_articles,
+                max_articles=quota.max_articles,
+                plan_slug=quota.plan_slug,
+            )
+            return {
+                "topic_id": str(topic_id),
+                "project_id": str(project_id),
+                "status": "blocked_limit",
+                "reason": "monthly_article_limit_exceeded",
+                "used_articles": quota.used_articles,
+                "max_articles": quota.max_articles,
+            }
+
         result = await ArticleGenerationService(db).generate_for_topic(
             topic_id=topic_id,
             project_id=project_id,
