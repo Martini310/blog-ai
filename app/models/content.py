@@ -5,10 +5,10 @@ Flow:  Project → Topic → Article
        Project → ContentSchedule (when to trigger generation)
 """
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -63,8 +63,9 @@ class Topic(UUIDMixin, TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     slug: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[str] = mapped_column(
-        String(30), nullable=False, default="pending"
-    )  # pending | in_progress | completed | failed | skipped
+        String(30), nullable=False, default="queued"
+    )  # queued | scheduled | in_progress | completed | failed | skipped
+    scheduled_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     topic_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
@@ -76,6 +77,7 @@ class Topic(UUIDMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_topics_project_id", "project_id"),
         Index("ix_topics_status", "status"),
+        Index("ix_topics_scheduled_date", "scheduled_date"),
         Index("ix_topics_priority", "priority"),
     )
 

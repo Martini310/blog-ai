@@ -62,6 +62,8 @@ class Project(UUIDMixin, TimestampMixin, Base):
 class ProjectAnalysis(UUIDMixin, TimestampMixin, Base):
     """
     Stores the latest AI analysis snapshot for a project.
+    'ai_context' stores compact strategic memory reused by downstream
+    generation tasks to avoid resending full project description.
     'result' is JSONB to accommodate variable LLM output structure.
     """
 
@@ -73,6 +75,7 @@ class ProjectAnalysis(UUIDMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(
         String(30), nullable=False, default="pending"
     )  # pending | running | completed | failed
+    ai_context: Mapped[str] = mapped_column(Text, nullable=False, default="")
     result: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     error_message: Mapped[str | None] = mapped_column(Text)
 

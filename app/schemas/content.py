@@ -1,7 +1,8 @@
 """
 Content pipeline schemas: Topic, Article, ContentSchedule.
 """
-from datetime import datetime
+from datetime import date, datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -16,6 +17,8 @@ from app.schemas.common import ORMBase
 class TopicCreate(BaseModel):
     title: str = Field(max_length=500)
     slug: str = Field(max_length=500)
+    status: Literal["queued", "scheduled"] = "queued"
+    scheduled_date: date | None = None
     priority: int = Field(default=0, ge=0, le=100)
     topic_metadata: dict = Field(default_factory=dict)
 
@@ -25,7 +28,8 @@ class TopicOut(ORMBase):
     project_id: UUID
     title: str
     slug: str
-    status: str
+    status: Literal["queued", "scheduled", "in_progress", "completed", "failed", "skipped"]
+    scheduled_date: date | None
     priority: int
     topic_metadata: dict
     created_at: datetime

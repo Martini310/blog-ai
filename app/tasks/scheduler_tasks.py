@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 def run_due_content_schedules() -> None:
     """
     Scans ContentSchedule rows where next_run_at <= now() and is_active=True,
-    then dispatches generate_article tasks for each pending topic.
+    then dispatches generate_article tasks for due queued/scheduled topics.
     """
     set_task_name("run_due_content_schedules")
     asyncio.get_event_loop().run_until_complete(_run_due_schedules_async())
@@ -44,7 +44,7 @@ async def _run_due_schedules_async() -> None:
 
         dispatched = 0
         for schedule in schedules:
-            # TODO: fetch pending topics for this project and dispatch per topic
+            # TODO: fetch due queued/scheduled topics and dispatch per topic
             # For now, log that we would dispatch
             logger.info(
                 "schedule_due",

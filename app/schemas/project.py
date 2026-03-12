@@ -43,6 +43,7 @@ class ProjectAnalysisOut(ORMBase):
     id: UUID
     project_id: UUID
     status: str
+    ai_context: str
     result: dict
     error_message: str | None
     created_at: datetime
