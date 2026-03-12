@@ -7,13 +7,11 @@ They query the DB for work to do and dispatch content_tasks as needed.
 import asyncio
 from datetime import UTC, datetime
 
-from sqlalchemy import select
-
 from app.core.database import get_db
-from app.core.logging import get_logger, set_task_name
-from app.models.content import ContentSchedule
+from app.core.logging import get_logger, get_request_id, set_project_id, set_task_name
+from app.services.scheduler_service import SchedulerService
 from app.tasks.celery_app import celery_app
-from app.tasks.content_tasks import generate_article
+from app.tasks.content_tasks import generate_article, generate_topics
 
 logger = get_logger(__name__)
 
@@ -34,29 +32,95 @@ def run_due_content_schedules() -> None:
 
 async def _run_due_schedules_async() -> None:
     now = datetime.now(UTC)
-    async with get_db() as db:
-        schedules = await db.scalars(
-            select(ContentSchedule).where(
-                ContentSchedule.is_active.is_(True),
-                ContentSchedule.next_run_at <= now,
-            )
-        )
+    run_date = now.date()
 
-        dispatched = 0
+    async with get_db() as db:
+        scheduler_service = SchedulerService(db)
+        schedules = await scheduler_service.list_due_schedules(now)
+
+        article_dispatched = 0
+        topic_generation_dispatched = 0
+        skipped = 0
+
         for schedule in schedules:
-            # TODO: fetch due queued/scheduled topics and dispatch per topic
-            # For now, log that we would dispatch
+            set_project_id(str(schedule.project_id))
             logger.info(
                 "schedule_due",
                 schedule_id=str(schedule.id),
                 project_id=str(schedule.project_id),
             )
 
-            # Update last_run_at (next_run_at computation belongs in a service)
-            schedule.last_run_at = now
-            dispatched += 1
+            owner_id = await scheduler_service.get_project_owner_id(schedule.project_id)
+            if not owner_id:
+                logger.warning(
+                    "schedule_owner_not_found",
+                    schedule_id=str(schedule.id),
+                    project_id=str(schedule.project_id),
+                )
+                scheduler_service.mark_schedule_run(schedule, now)
+                skipped += 1
+                continue
 
-    logger.info("schedules_processed", count=dispatched)
+            topic = await scheduler_service.reserve_next_eligible_topic(
+                schedule.project_id,
+                run_date,
+            )
+            if topic:
+                scheduler_service.clear_topic_generation_marker(schedule)
+                task = generate_article.delay(
+                    topic_id=str(topic.id),
+                    project_id=str(schedule.project_id),
+                    user_id=str(owner_id),
+                    request_id=get_request_id() or None,
+                )
+                logger.info(
+                    "article_generation_task_dispatched",
+                    task_id=task.id,
+                    schedule_id=str(schedule.id),
+                    topic_id=str(topic.id),
+                    project_id=str(schedule.project_id),
+                )
+                article_dispatched += 1
+            else:
+                has_backlog = await scheduler_service.has_topic_backlog(schedule.project_id)
+                if has_backlog:
+                    logger.info(
+                        "no_due_topics_available",
+                        schedule_id=str(schedule.id),
+                        project_id=str(schedule.project_id),
+                    )
+                    skipped += 1
+                elif scheduler_service.should_request_topic_generation(schedule, now):
+                    task = generate_topics.delay(
+                        project_id=str(schedule.project_id),
+                        user_id=str(owner_id),
+                        request_id=get_request_id() or None,
+                    )
+                    scheduler_service.mark_topic_generation_requested(schedule, now)
+                    logger.info(
+                        "topic_generation_task_dispatched",
+                        task_id=task.id,
+                        schedule_id=str(schedule.id),
+                        project_id=str(schedule.project_id),
+                    )
+                    topic_generation_dispatched += 1
+                else:
+                    logger.info(
+                        "topic_generation_cooldown_active",
+                        schedule_id=str(schedule.id),
+                        project_id=str(schedule.project_id),
+                    )
+                    skipped += 1
+
+            scheduler_service.mark_schedule_run(schedule, now)
+
+    logger.info(
+        "schedules_processed",
+        schedules_count=len(schedules),
+        article_dispatched=article_dispatched,
+        topic_generation_dispatched=topic_generation_dispatched,
+        skipped=skipped,
+    )
 
 
 @celery_app.task(

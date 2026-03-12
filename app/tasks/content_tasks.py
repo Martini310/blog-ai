@@ -16,8 +16,7 @@ from celery import Task
 
 from app.core.database import get_db
 from app.core.logging import get_logger, set_project_id, set_task_name, set_topic_id
-from app.schemas.generation_log import GenerationLogCreate
-from app.services.generation_log_service import GenerationLogService, timed_generation_step
+from app.services.generation_log_service import timed_generation_step
 from app.tasks.celery_app import celery_app
 
 logger = get_logger(__name__)
@@ -135,6 +134,70 @@ async def _generate_article_async(
             project_id=str(project_id),
         )
         return {"topic_id": str(topic_id), "status": "completed", "outline": outline}
+
+
+# ---------------------------------------------------------------------------
+# Topic generation task
+# ---------------------------------------------------------------------------
+@celery_app.task(
+    bind=True,
+    base=LoggedTask,
+    name="app.tasks.content_tasks.generate_topics",
+    queue="generation",
+    max_retries=2,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+)
+def generate_topics(
+    self: Task,
+    project_id: str,
+    user_id: str,
+    request_id: str | None = None,
+) -> dict:
+    """
+    Generates new topic ideas for a project when the queue is exhausted.
+    """
+    set_project_id(project_id)
+    logger.info("generate_topics_started", project_id=project_id)
+
+    return asyncio.get_event_loop().run_until_complete(
+        _generate_topics_async(
+            project_id=uuid.UUID(project_id),
+            user_id=uuid.UUID(user_id),
+            request_id=request_id,
+        )
+    )
+
+
+async def _generate_topics_async(
+    project_id: uuid.UUID,
+    user_id: uuid.UUID,
+    request_id: str | None,
+) -> dict:
+    async with get_db() as db:
+        async with timed_generation_step(
+            db,
+            step="topic_generation",
+            task_name="generate_topics",
+            user_id=user_id,
+            project_id=project_id,
+            request_id=request_id,
+        ) as ctx:
+            # TODO: call LLM service + persist generated topics through TopicService.
+            topics: list[dict] = []
+            ctx["tokens_used"] = 300  # stub
+
+    logger.info(
+        "generate_topics_completed",
+        project_id=str(project_id),
+        topics_generated=len(topics),
+    )
+    return {
+        "project_id": str(project_id),
+        "status": "completed",
+        "topics_generated": len(topics),
+    }
 
 
 # ---------------------------------------------------------------------------
