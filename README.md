@@ -419,11 +419,11 @@ Gotowe fundamenty:
 
 Miejsca `TODO` / szkielety:
 1. realne wywołania LLM w `content_tasks.py` (teraz stuby),
-2. pełna logika schedulera (dobór topików, dispatch),
+2. zaawansowane strategie schedulera (obecny dobór topików i dispatch działa, ale bez np. retry policy per project),
 3. polityka retencji logów (`cleanup_stale_logs`),
 4. panel admina (`app/admin`),
 5. moduł scheduler management (`app/scheduler`),
-6. limity subskrypcji oparte o plan (obecnie częściowo hardcoded).
+6. billing oparty o realne koszty modeli (token usage jest logowane, ale bez wyceny finansowej).
 
 ## 8. Jak czytać kod krok po kroku (dla juniora)
 
@@ -449,6 +449,27 @@ docker compose up --build
 5. Flower:
 `http://localhost:5555`
 
-## 10. Jedno zdanie podsumowania
+## 10. Testy
+
+Aktualny pakiet testów (`tests/`) obejmuje:
+1. limity subskrypcji i usage miesięczne,
+2. cooldown + markery w schedulerze,
+3. dispatch schedulera z blokadą limitów,
+4. ścieżkę `blocked_limit` w `generate_article`.
+
+Uruchomienie:
+```bash
+python -m pytest tests -q
+```
+
+W kontenerze (z podmontowanym katalogiem `tests`):
+```bash
+docker compose run --rm -T \
+  -v /ABS/PATH/TO/blog-ai/tests:/app/tests:ro \
+  -v /ABS/PATH/TO/blog-ai/pytest.ini:/app/pytest.ini:ro \
+  api python -m pytest tests -q
+```
+
+## 11. Jedno zdanie podsumowania
 
 Ten kod to dobrze rozdzielony szkielet produkcyjnego systemu AI content automation: warstwy i observability są poprawnie przygotowane, a główna rzecz do dokończenia to właściwa logika generacji AI i schedulera.

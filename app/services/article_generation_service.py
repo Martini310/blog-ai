@@ -14,9 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.content import Article, Topic
 from app.models.project import ProjectAnalysis
 from app.services.generation_log_service import timed_generation_step
+from app.services.llm_service import LLMResult, LLMService
 
-
-PIPELINE_MODEL_NAME = "mock-gpt-4o-mini"
 PIPELINE_TASK_NAME = "generate_article"
 
 
@@ -40,8 +39,9 @@ class ArticlePipelineState:
 
 
 class ArticleGenerationService:
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, llm_service: LLMService | None = None) -> None:
         self._db = db
+        self._llm_service = llm_service
 
     async def generate_for_topic(
         self,
@@ -157,6 +157,11 @@ class ArticleGenerationService:
             raise ArticleGenerationError(f"Topic {topic_id} not found for project {project_id}.")
         return topic
 
+    def _get_llm(self) -> LLMService:
+        if not self._llm_service:
+            self._llm_service = LLMService()
+        return self._llm_service
+
     async def _set_topic_in_progress(self, state: ArticlePipelineState) -> None:
         state.topic.status = "in_progress"
         await self._db.flush()
@@ -201,20 +206,31 @@ class ArticleGenerationService:
             project_id=project_id,
             topic_id=topic_id,
             request_id=request_id,
-            model_used=PIPELINE_MODEL_NAME,
+            model_used=self._get_llm().model_name,
         ) as ctx:
-            state.outline = {
-                "title": state.topic.title,
-                "sections": [
-                    "Introduction",
-                    "Main Insights",
-                    "Actionable Checklist",
-                    "Conclusion",
-                ],
-                "context_used": bool(state.ai_context),
-            }
-            ctx["tokens_used"] = 220
-            state.total_tokens += 220
+            system_prompt = (
+                "You are an expert SEO strategist. "
+                "Return strict JSON only."
+            )
+            user_prompt = (
+                "Prepare an SEO article outline.\n"
+                f"Topic: {state.topic.title}\n"
+                f"Topic slug: {state.topic.slug}\n"
+                f"Strategic context: {state.ai_context or 'N/A'}\n\n"
+                "Return JSON with keys:\n"
+                "- title: string\n"
+                "- angle: string\n"
+                "- sections: array of 4-8 section titles"
+            )
+            result = await self._get_llm().generate_json(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.4,
+                max_tokens=900,
+            )
+            ctx["tokens_used"] = result.tokens_used
+            state.total_tokens += result.tokens_used
+            state.outline = self._normalize_outline(result, fallback_title=state.topic.title)
 
     async def _generate_sections(
         self,
@@ -233,17 +249,30 @@ class ArticleGenerationService:
             project_id=project_id,
             topic_id=topic_id,
             request_id=request_id,
-            model_used=PIPELINE_MODEL_NAME,
+            model_used=self._get_llm().model_name,
         ) as ctx:
-            state.sections = [
-                {
-                    "heading": heading,
-                    "body": f"{heading} for topic '{state.topic.title}'.",
-                }
-                for heading in state.outline.get("sections", [])
-            ]
-            ctx["tokens_used"] = 1200
-            state.total_tokens += 1200
+            sections_input = ", ".join(state.outline.get("sections", []))
+            system_prompt = (
+                "You are a senior SEO copywriter. "
+                "Write substantive article sections. Return strict JSON only."
+            )
+            user_prompt = (
+                f"Write article sections for topic '{state.topic.title}'.\n"
+                f"Use this strategic context: {state.ai_context or 'N/A'}\n"
+                f"Section headings: {sections_input}\n\n"
+                "Return JSON with key 'sections' as array of objects:\n"
+                "- heading: string\n"
+                "- body: 120-220 words, practical and specific"
+            )
+            result = await self._get_llm().generate_json(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.5,
+                max_tokens=2600,
+            )
+            ctx["tokens_used"] = result.tokens_used
+            state.total_tokens += result.tokens_used
+            state.sections = self._normalize_sections(result, fallback_sections=state.outline["sections"])
 
     async def _merge_content(
         self,
@@ -267,7 +296,7 @@ class ArticleGenerationService:
                 f"## {section['heading']}\n{section['body']}" for section in state.sections
             )
             state.merged_content = {
-                "title": state.topic.title,
+                "title": state.outline.get("title") or state.topic.title,
                 "body": body,
                 "sections": state.sections,
             }
@@ -289,16 +318,28 @@ class ArticleGenerationService:
             project_id=project_id,
             topic_id=topic_id,
             request_id=request_id,
-            model_used=PIPELINE_MODEL_NAME,
+            model_used=self._get_llm().model_name,
         ) as ctx:
-            keyword = state.topic.slug.replace("-", " ")
-            state.seo_data = {
-                "primary_keyword": keyword,
-                "secondary_keywords": [f"{keyword} guide", f"{keyword} tips"],
-                "readability_score": 70,
-            }
-            ctx["tokens_used"] = 260
-            state.total_tokens += 260
+            system_prompt = (
+                "You are an SEO analyst. Return strict JSON only."
+            )
+            user_prompt = (
+                f"Topic: {state.topic.title}\n"
+                f"Article body excerpt: {state.merged_content.get('body', '')[:1800]}\n\n"
+                "Return JSON:\n"
+                "- primary_keyword: string\n"
+                "- secondary_keywords: array of 3-6 strings\n"
+                "- readability_score: integer 1-100"
+            )
+            result = await self._get_llm().generate_json(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.2,
+                max_tokens=500,
+            )
+            ctx["tokens_used"] = result.tokens_used
+            state.total_tokens += result.tokens_used
+            state.seo_data = self._normalize_seo(result, fallback_slug=state.topic.slug)
 
     async def _apply_internal_linking(
         self,
@@ -346,15 +387,29 @@ class ArticleGenerationService:
             project_id=project_id,
             topic_id=topic_id,
             request_id=request_id,
-            model_used=PIPELINE_MODEL_NAME,
+            model_used=self._get_llm().model_name,
         ) as ctx:
-            state.metadata = {
-                "title": state.topic.title,
-                "description": f"Practical guide about {state.topic.title.lower()}",
-                "canonical_slug": state.topic.slug,
-            }
-            ctx["tokens_used"] = 140
-            state.total_tokens += 140
+            system_prompt = (
+                "You are a technical SEO editor. Return strict JSON only."
+            )
+            user_prompt = (
+                f"Prepare metadata for article '{state.merged_content.get('title')}'.\n"
+                f"Primary keyword: {state.seo_data.get('primary_keyword')}\n"
+                f"Topic slug: {state.topic.slug}\n\n"
+                "Return JSON:\n"
+                "- title: string (max 60 chars)\n"
+                "- description: string (120-160 chars)\n"
+                "- canonical_slug: string"
+            )
+            result = await self._get_llm().generate_json(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.3,
+                max_tokens=300,
+            )
+            ctx["tokens_used"] = result.tokens_used
+            state.total_tokens += result.tokens_used
+            state.metadata = self._normalize_metadata(result, fallback_slug=state.topic.slug)
 
     async def _compute_metrics(
         self,
@@ -420,7 +475,7 @@ class ArticleGenerationService:
                         "meta_description": state.metadata.get("description"),
                     },
                 },
-                model_used=PIPELINE_MODEL_NAME,
+                model_used=self._get_llm().model_name,
                 total_tokens=state.metrics.get("total_tokens"),
             )
             self._db.add(article)
@@ -453,3 +508,94 @@ class ArticleGenerationService:
         if topic.status != "completed":
             topic.status = "failed"
             await self._db.flush()
+
+    @staticmethod
+    def _normalize_outline(result: LLMResult, *, fallback_title: str) -> dict[str, Any]:
+        data = result.data if isinstance(result.data, dict) else {}
+        sections_raw = data.get("sections")
+        sections: list[str] = []
+        if isinstance(sections_raw, list):
+            for item in sections_raw:
+                text = str(item).strip()
+                if text:
+                    sections.append(text)
+        if len(sections) < 3:
+            sections = ["Introduction", "Core Concepts", "Implementation Steps", "Conclusion"]
+        return {
+            "title": str(data.get("title") or fallback_title),
+            "angle": str(data.get("angle") or ""),
+            "sections": sections[:8],
+            "context_used": True,
+        }
+
+    @staticmethod
+    def _normalize_sections(
+        result: LLMResult,
+        *,
+        fallback_sections: list[str],
+    ) -> list[dict[str, str]]:
+        data = result.data if isinstance(result.data, dict) else {}
+        raw_items = data.get("sections")
+        sections: list[dict[str, str]] = []
+
+        if isinstance(raw_items, list):
+            for idx, item in enumerate(raw_items):
+                if not isinstance(item, dict):
+                    continue
+                heading = str(item.get("heading") or f"Section {idx + 1}").strip()
+                body = str(item.get("body") or "").strip()
+                if heading and body:
+                    sections.append({"heading": heading, "body": body})
+
+        if sections:
+            return sections
+
+        fallback: list[dict[str, str]] = []
+        for heading in fallback_sections:
+            fallback.append(
+                {
+                    "heading": heading,
+                    "body": (
+                        f"{heading} for topic content strategy. "
+                        "Expand this section with practical guidance and examples."
+                    ),
+                }
+            )
+        return fallback
+
+    @staticmethod
+    def _normalize_seo(result: LLMResult, *, fallback_slug: str) -> dict[str, Any]:
+        data = result.data if isinstance(result.data, dict) else {}
+        primary = str(data.get("primary_keyword") or fallback_slug.replace("-", " ")).strip()
+
+        secondary_raw = data.get("secondary_keywords")
+        secondary: list[str] = []
+        if isinstance(secondary_raw, list):
+            for item in secondary_raw:
+                text = str(item).strip()
+                if text:
+                    secondary.append(text)
+
+        readability = data.get("readability_score")
+        try:
+            readability_int = int(readability)
+        except (TypeError, ValueError):
+            readability_int = 70
+
+        return {
+            "primary_keyword": primary,
+            "secondary_keywords": secondary or [f"{primary} guide", f"{primary} checklist"],
+            "readability_score": max(1, min(100, readability_int)),
+        }
+
+    @staticmethod
+    def _normalize_metadata(result: LLMResult, *, fallback_slug: str) -> dict[str, str]:
+        data = result.data if isinstance(result.data, dict) else {}
+        canonical_slug = str(data.get("canonical_slug") or fallback_slug).strip().strip("/")
+        if not canonical_slug:
+            canonical_slug = fallback_slug
+        return {
+            "title": str(data.get("title") or "").strip()[:120],
+            "description": str(data.get("description") or "").strip()[:220],
+            "canonical_slug": canonical_slug,
+        }

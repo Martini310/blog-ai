@@ -55,6 +55,15 @@ class Settings(BaseSettings):
     REDIS_URL: str  # redis://host:6379/0
 
     # -------------------------------------------------------------------------
+    # LLM provider
+    # -------------------------------------------------------------------------
+    LLM_PROVIDER: Literal["openai", "mock"] = "openai"
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    LLM_TIMEOUT_SECONDS: int = 90
+
+    # -------------------------------------------------------------------------
     # Celery
     # -------------------------------------------------------------------------
     CELERY_TASK_ALWAYS_EAGER: bool = False  # set True in tests
