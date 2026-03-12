@@ -16,6 +16,7 @@ from celery import Task
 
 from app.core.database import get_db
 from app.core.logging import get_logger, set_project_id, set_task_name, set_topic_id
+from app.services.article_generation_service import ArticleGenerationService
 from app.services.generation_log_service import timed_generation_step
 from app.tasks.celery_app import celery_app
 
@@ -99,41 +100,20 @@ async def _generate_article_async(
     outside of a FastAPI request context (no dependency injection).
     """
     async with get_db() as db:
-        # Step 1: Generate outline
-        async with timed_generation_step(
-            db,
-            step="outline",
-            task_name="generate_article",
-            user_id=user_id,
-            project_id=project_id,
+        result = await ArticleGenerationService(db).generate_for_topic(
             topic_id=topic_id,
-            request_id=request_id,
-        ) as ctx:
-            # TODO: call LLM service here
-            # outline = await llm_service.generate_outline(topic)
-            outline = {"sections": ["Introduction", "Main", "Conclusion"]}  # stub
-            ctx["tokens_used"] = 150  # stub – replace with real usage
-
-        # Step 2: Generate article body
-        async with timed_generation_step(
-            db,
-            step="article_body",
-            task_name="generate_article",
-            user_id=user_id,
             project_id=project_id,
-            topic_id=topic_id,
+            user_id=user_id,
             request_id=request_id,
-        ) as ctx:
-            # TODO: call LLM service here
-            article_content = {"body": "...", "word_count": 0}  # stub
-            ctx["tokens_used"] = 2000  # stub
+        )
 
         logger.info(
             "generate_article_completed",
             topic_id=str(topic_id),
             project_id=str(project_id),
+            article_id=result.get("article_id"),
         )
-        return {"topic_id": str(topic_id), "status": "completed", "outline": outline}
+        return result
 
 
 # ---------------------------------------------------------------------------
