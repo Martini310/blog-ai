@@ -211,18 +211,15 @@ async def _generate_topics_async(
     user_id: uuid.UUID,
     request_id: str | None,
 ) -> dict:
+    from app.services.topic_generation_service import TopicGenerationService
+
     async with get_db() as db:
-        async with timed_generation_step(
-            db,
-            step="topic_generation",
-            task_name="generate_topics",
-            user_id=user_id,
+        topics = await TopicGenerationService(db).generate_batch(
             project_id=project_id,
+            user_id=user_id,
             request_id=request_id,
-        ) as ctx:
-            # TODO: call LLM service + persist generated topics through TopicService.
-            topics: list[dict] = []
-            ctx["tokens_used"] = 300  # stub
+            batch_size=5,
+        )
 
     logger.info(
         "generate_topics_completed",
@@ -273,17 +270,13 @@ async def _analyse_project_async(
     user_id: uuid.UUID,
     request_id: str | None,
 ) -> dict:
-    async with get_db() as db:
-        async with timed_generation_step(
-            db,
-            step="project_analysis",
-            task_name="analyse_project",
-            user_id=user_id,
-            project_id=project_id,
-            request_id=request_id,
-        ) as ctx:
-            # TODO: call LLM service / SEO analysis service
-            result = {"keywords": [], "recommendations": []}  # stub
-            ctx["tokens_used"] = 500
+    from app.services.project_analysis_service import ProjectAnalysisService
 
-    return {"project_id": str(project_id), "status": "completed"}
+    async with get_db() as db:
+        result = await ProjectAnalysisService(db).analyze_project(
+            project_id=project_id,
+            user_id=user_id,
+            request_id=request_id,
+        )
+
+    return result

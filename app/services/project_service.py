@@ -85,6 +85,16 @@ class ProjectService:
                 project_id=str(project.id),
                 owner_id=str(owner_id),
             )
+            
+            from app.core.logging import get_request_id
+            from app.tasks.content_tasks import analyse_project
+            
+            analyse_project.delay(
+                project_id=str(project.id),
+                user_id=str(owner_id),
+                request_id=get_request_id(),
+            )
+            
             return project
 
         except Exception as exc:

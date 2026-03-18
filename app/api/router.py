@@ -5,7 +5,7 @@ Add new route modules here; never import them individually in main.py.
 """
 from fastapi import APIRouter
 
-from app.api.routes import auth, health, projects, topics
+from app.api.routes import articles, auth, health, projects, topics
 
 api_router = APIRouter()
 
@@ -16,3 +16,4 @@ api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(projects.router)
 api_router.include_router(topics.router)
+api_router.include_router(articles.router)
