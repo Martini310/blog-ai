@@ -64,3 +64,34 @@ async def get_article(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found.")
     
     return ArticleOut.model_validate(article)
+
+
+@router.patch("/{article_id}/publish", response_model=ArticleOut)
+async def publish_article(
+    project_id: uuid.UUID,
+    article_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> ArticleOut:
+    try:
+        await ProjectService(db).get_by_id(project_id, current_user.id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    stmt = (
+        select(Article)
+        .join(Topic, Topic.id == Article.topic_id)
+        .where(Topic.project_id == project_id, Article.id == article_id)
+        .with_for_update()
+    )
+    article = await db.scalar(stmt)
+    if not article:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found.")
+    
+    from datetime import datetime, UTC
+    article.status = "published"
+    article.published_at = datetime.now(UTC)
+    await db.flush()
+    
+    logger.info("article_published", article_id=str(article_id), project_id=str(project_id))
+    return ArticleOut.model_validate(article)
