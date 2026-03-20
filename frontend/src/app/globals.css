@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: var(--font-plus-jakarta-sans);
+  --font-sans: var(--font-inter);
+  
+  --color-background: #060e20;
+  --color-surface-container-lowest: #000000;
+  --color-surface-container-low: #081329;
+  --color-surface-container: #0c1934;
+  --color-surface-container-high: #101e3e;
+  --color-surface-container-highest: #142449;
+  
+  --color-primary: #7de9ff;
+  --color-primary-container: #3adffa;
+  --color-on-primary-container: #004b56;
+  --color-secondary: #ddb7ff;
+  --color-tertiary: #c0c1ff;
+  
+  --color-on-surface: #dee5ff;
+  --color-on-surface-variant: #9baad6;
+  --color-outline-variant: #38476d;
+  --color-error: #fd6f85;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+}
+
+.glass-panel {
+  background-color: color-mix(in srgb, var(--color-surface-container-highest) 70%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.glass-border-glow {
+  position: relative;
+}
+
+.glass-border-glow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(to bottom right, color-mix(in srgb, var(--color-primary) 30%, transparent), color-mix(in srgb, var(--color-secondary) 30%, transparent));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}

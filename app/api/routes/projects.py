@@ -17,8 +17,14 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.dependencies import CurrentUser, DBSession
 from app.core.logging import get_logger
+from fastapi import APIRouter, HTTPException, Query, status
+
+from app.api.dependencies import CurrentUser, DBSession
+from app.core.logging import get_logger
 from app.schemas.common import PaginatedResponse
-from app.schemas.project import ProjectCreate, ProjectOut, ProjectUpdate
+from app.schemas.project import ProjectCreate, ProjectOut, ProjectUpdate, ProjectAnalysisOut
+from app.models.project import ProjectAnalysis
+from sqlalchemy import select
 from app.services.project_service import (
     ProjectLimitExceededError,
     ProjectNotFoundError,
@@ -28,6 +34,25 @@ from app.tasks.content_tasks import analyse_project
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 logger = get_logger(__name__)
+
+@router.get("/{project_id}/analysis", response_model=ProjectAnalysisOut)
+async def get_project_analysis(
+    project_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> ProjectAnalysisOut:
+    try:
+        await ProjectService(db).get_by_id(project_id, current_user.id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    analysis = await db.scalar(
+        select(ProjectAnalysis).where(ProjectAnalysis.project_id == project_id)
+    )
+    if not analysis:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found.")
+    
+    return ProjectAnalysisOut.model_validate(analysis)
 
 
 @router.get("", response_model=PaginatedResponse[ProjectOut])

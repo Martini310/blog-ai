@@ -80,14 +80,25 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # CORS
     # -------------------------------------------------------------------------
-    CORS_ORIGINS: list[AnyHttpUrl] = []
+    CORS_ORIGINS: list[str] = []
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: str | list) -> list:
+        origins = []
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v
+            if v.startswith("["):
+                import json
+                try:
+                    v = json.loads(v)
+                except Exception:
+                    v = []
+            else:
+                v = [i.strip() for i in v.split(",") if i.strip()]
+        if isinstance(v, list):
+            for origin in v:
+                origins.append(str(origin).rstrip("/"))
+        return origins
 
     # -------------------------------------------------------------------------
     # Logging

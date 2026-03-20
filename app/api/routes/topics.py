@@ -34,6 +34,22 @@ async def list_topics(
     return [TopicOut.model_validate(t) for t in topics]
 
 
+@router.get("/{topic_id}", response_model=TopicOut)
+async def get_topic(
+    project_id: uuid.UUID,
+    topic_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> TopicOut:
+    try:
+        await ProjectService(db).get_by_id(project_id, current_user.id)
+        topic = await TopicService(db).get_by_id(topic_id, project_id)
+    except (ProjectNotFoundError, TopicNotFoundError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    return TopicOut.model_validate(topic)
+
+
 @router.post("", response_model=TopicOut, status_code=status.HTTP_201_CREATED)
 async def create_topic(
     project_id: uuid.UUID,
