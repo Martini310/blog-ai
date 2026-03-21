@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     LLM_PROVIDER: Literal["openai", "mock"] = "openai"
     OPENAI_API_KEY: str = ""
+    TAVILY_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     LLM_TIMEOUT_SECONDS: int = 90

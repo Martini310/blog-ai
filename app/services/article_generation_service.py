@@ -15,6 +15,8 @@ from app.models.content import Article, Topic
 from app.models.project import ProjectAnalysis
 from app.services.generation_log_service import timed_generation_step
 from app.services.llm_service import LLMResult, LLMService
+from app.services.section_generation_service import SectionGenerationService
+from app.services.tavily_service import TavilyService
 
 PIPELINE_TASK_NAME = "generate_article"
 
@@ -241,38 +243,56 @@ class ArticleGenerationService:
         user_id: uuid.UUID,
         request_id: str | None,
     ) -> None:
-        async with timed_generation_step(
-            self._db,
-            step="generate_sections",
-            task_name=PIPELINE_TASK_NAME,
-            user_id=user_id,
-            project_id=project_id,
-            topic_id=topic_id,
-            request_id=request_id,
-            model_used=self._get_llm().model_name,
-        ) as ctx:
-            sections_input = ", ".join(state.outline.get("sections", []))
-            system_prompt = (
-                "You are a senior SEO copywriter. "
-                "Write substantive article sections. Return strict JSON only."
-            )
-            user_prompt = (
-                f"Write article sections for topic '{state.topic.title}'.\n"
-                f"Use this strategic context: {state.ai_context or 'N/A'}\n"
-                f"Section headings: {sections_input}\n\n"
-                "Return JSON with key 'sections' as array of objects:\n"
-                "- heading: string\n"
-                "- body: 120-220 words, practical and specific"
-            )
-            result = await self._get_llm().generate_json(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=0.5,
-                max_tokens=2600,
-            )
-            ctx["tokens_used"] = result.tokens_used
-            state.total_tokens += result.tokens_used
-            state.sections = self._normalize_sections(result, fallback_sections=state.outline["sections"])
+        tavily_service = TavilyService()
+        section_gen_service = SectionGenerationService(llm_service=self._get_llm())
+
+        sections = []
+        outline_sections = state.outline.get("sections", [])
+        topic_slug = state.topic.slug or ""
+        keyword = topic_slug.replace("-", " ")
+
+        for heading in outline_sections:
+            context_text = ""
+            async with timed_generation_step(
+                self._db,
+                step="tavily_fetch",
+                task_name=PIPELINE_TASK_NAME,
+                user_id=user_id,
+                project_id=project_id,
+                topic_id=topic_id,
+                request_id=request_id,
+            ):
+                query = f"{state.topic.title} {heading}"
+                context_text = await tavily_service.get_context(query)
+
+            async with timed_generation_step(
+                self._db,
+                step="section_generation",
+                task_name=PIPELINE_TASK_NAME,
+                user_id=user_id,
+                project_id=project_id,
+                topic_id=topic_id,
+                request_id=request_id,
+                model_used=self._get_llm().model_name,
+            ) as ctx:
+                result = await section_gen_service.generate_section(
+                    topic=state.topic.title,
+                    section_title=heading,
+                    section_description=state.ai_context,
+                    keyword=keyword,
+                    context=context_text,
+                )
+                
+                tokens_used = result.get("tokens_used", 0)
+                ctx["tokens_used"] = tokens_used
+                state.total_tokens += tokens_used
+
+                sections.append({
+                    "heading": heading,
+                    "body": result.get("body", "")
+                })
+
+        state.sections = sections
 
     async def _merge_content(
         self,
