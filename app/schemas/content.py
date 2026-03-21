@@ -17,10 +17,19 @@ from app.schemas.common import ORMBase
 class TopicCreate(BaseModel):
     title: str = Field(max_length=500)
     slug: str = Field(max_length=500)
-    status: Literal["queued", "scheduled"] = "queued"
+    status: Literal["proposed", "queued", "scheduled", "rejected"] = "queued"
     scheduled_date: date | None = None
     priority: int = Field(default=0, ge=0, le=100)
     topic_metadata: dict = Field(default_factory=dict)
+
+
+class TopicUpdate(BaseModel):
+    title: str | None = Field(default=None, max_length=500)
+    slug: str | None = Field(default=None, max_length=500)
+    status: Literal["proposed", "queued", "scheduled", "in_progress", "completed", "failed", "skipped", "rejected"] | None = None
+    scheduled_date: date | None = None
+    priority: int | None = Field(default=None, ge=0, le=100)
+    topic_metadata: dict | None = None
 
 
 class TopicOut(ORMBase):
@@ -28,7 +37,7 @@ class TopicOut(ORMBase):
     project_id: UUID
     title: str
     slug: str
-    status: Literal["queued", "scheduled", "in_progress", "completed", "failed", "skipped"]
+    status: Literal["proposed", "queued", "scheduled", "in_progress", "completed", "failed", "skipped", "rejected"]
     scheduled_date: date | None
     priority: int
     topic_metadata: dict

@@ -39,6 +39,7 @@ class TopicGenerationService:
         user_id: uuid.UUID,
         request_id: str | None,
         batch_size: int = 5,
+        status: str = "queued",
     ) -> list[TopicCreate]:
         
         analysis = await self._get_project_analysis(project_id=project_id)
@@ -56,6 +57,12 @@ class TopicGenerationService:
                 model_used=self._get_llm().model_name,
             ) as ctx:
                 
+                scraped_articles = analysis.result.get("scraped_articles", [])
+                scraped_context = ""
+                if scraped_articles:
+                    articles_list = "\n".join(f"- {title}" for title in scraped_articles)
+                    scraped_context = f"\nExisting blog topics (DO NOT DUPLICATE THESE):\n{articles_list}\n"
+
                 system_prompt = (
                     "You are an expert SEO Content Strategist. "
                     "Your job is to ideate a batch of article topics based on the project's strategic context. "
@@ -63,7 +70,7 @@ class TopicGenerationService:
                 )
                 user_prompt = (
                     f"Generate {batch_size} unique, SEO-optimized article topics for a project with the following context:\n\n"
-                    f"{analysis.ai_context}\n\n"
+                    f"{analysis.ai_context}\n{scraped_context}\n"
                     "Return a JSON object with a 'topics' array. Each item in the array must be an object with:\n"
                     "- title: string (the article title)\n"
                     "- slug: string (URL friendly slug, lowercase, separated by hyphens)\n"
@@ -87,7 +94,7 @@ class TopicGenerationService:
                     topic_in = TopicCreate(
                         title=t["title"],
                         slug=clean_slug,
-                        status="queued",
+                        status=status,
                         priority=t["priority"],
                     )
                     await self._topic_service.create(project_id=project_id, payload=topic_in)

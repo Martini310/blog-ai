@@ -234,6 +234,67 @@ async def _generate_topics_async(
 
 
 # ---------------------------------------------------------------------------
+# Topic proposal task
+# ---------------------------------------------------------------------------
+@celery_app.task(
+    bind=True,
+    base=LoggedTask,
+    name="app.tasks.content_tasks.propose_topics",
+    queue="generation",
+    max_retries=2,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+)
+def propose_topics(
+    self: Task,
+    project_id: str,
+    user_id: str,
+    request_id: str | None = None,
+) -> dict:
+    """
+    Generates new topic proposals for a project (user-guided flow).
+    """
+    set_project_id(project_id)
+    logger.info("propose_topics_started", project_id=project_id)
+
+    return asyncio.get_event_loop().run_until_complete(
+        _propose_topics_async(
+            project_id=uuid.UUID(project_id),
+            user_id=uuid.UUID(user_id),
+            request_id=request_id,
+        )
+    )
+
+async def _propose_topics_async(
+    project_id: uuid.UUID,
+    user_id: uuid.UUID,
+    request_id: str | None,
+) -> dict:
+    from app.services.topic_generation_service import TopicGenerationService
+
+    async with get_db() as db:
+        topics = await TopicGenerationService(db).generate_batch(
+            project_id=project_id,
+            user_id=user_id,
+            request_id=request_id,
+            batch_size=10,
+            status="proposed",
+        )
+
+    logger.info(
+        "propose_topics_completed",
+        project_id=str(project_id),
+        topics_proposed=len(topics),
+    )
+    return {
+        "project_id": str(project_id),
+        "status": "completed",
+        "topics_proposed": len(topics),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Project analysis task
 # ---------------------------------------------------------------------------
 @celery_app.task(

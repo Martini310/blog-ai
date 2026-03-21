@@ -33,6 +33,7 @@ class Project(UUIDMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     domain: Mapped[str | None] = mapped_column(String(255))   # e.g. "tech", "finance"
+    blog_url: Mapped[str | None] = mapped_column(String(500)) # URL to scrape for existing topics
     language: Mapped[str] = mapped_column(String(10), nullable=False, default="en")
     status: Mapped[str] = mapped_column(
         String(30), nullable=False, default="active"

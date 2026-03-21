@@ -58,3 +58,12 @@ class TopicService:
         await self._db.flush()
         logger.info("topic_created", topic_id=str(topic.id), project_id=str(project_id))
         return topic
+
+    async def update(self, topic_id: uuid.UUID, project_id: uuid.UUID, payload: dict) -> Topic:
+        topic = await self.get_by_id(topic_id, project_id)
+        for key, value in payload.items():
+            if value is not None:
+                setattr(topic, key, value)
+        await self._db.flush()
+        logger.info("topic_updated", topic_id=str(topic.id), project_id=str(project_id))
+        return topic

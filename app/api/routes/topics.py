@@ -7,10 +7,10 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.dependencies import CurrentUser, DBSession
 from app.core.logging import get_logger, get_request_id
-from app.schemas.content import TopicCreate, TopicOut
+from app.schemas.content import TopicCreate, TopicOut, TopicUpdate
 from app.services.project_service import ProjectNotFoundError, ProjectService
 from app.services.topic_service import TopicNotFoundError, TopicService
-from app.tasks.content_tasks import generate_article
+from app.tasks.content_tasks import generate_article, propose_topics
 
 router = APIRouter(prefix="/projects/{project_id}/topics", tags=["topics"])
 logger = get_logger(__name__)
@@ -96,3 +96,53 @@ async def trigger_article_generation(
         project_id=str(project_id),
     )
     return {"task_id": task.id, "status": "queued"}
+
+@router.post("/propose", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_topic_proposals(
+    project_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    """
+    Dispatch topic proposal generation for a project.
+    Returns immediately with a task ID; generation runs asynchronously.
+    """
+    try:
+        await ProjectService(db).get_by_id(project_id, current_user.id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    task = propose_topics.delay(
+        project_id=str(project_id),
+        user_id=str(current_user.id),
+        request_id=get_request_id(),
+    )
+    logger.info(
+        "topic_proposal_task_dispatched",
+        task_id=task.id,
+        project_id=str(project_id),
+    )
+    return {"task_id": task.id, "status": "queued"}
+
+@router.patch("/{topic_id}", response_model=TopicOut)
+async def update_topic(
+    project_id: uuid.UUID,
+    topic_id: uuid.UUID,
+    payload: TopicUpdate,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> TopicOut:
+    """
+    Update a topic (e.g. status transition from 'proposed' to 'queued').
+    """
+    try:
+        await ProjectService(db).get_by_id(project_id, current_user.id)
+        topic = await TopicService(db).update(
+            topic_id, 
+            project_id, 
+            payload.model_dump(exclude_unset=True)
+        )
+    except (ProjectNotFoundError, TopicNotFoundError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    return TopicOut.model_validate(topic)

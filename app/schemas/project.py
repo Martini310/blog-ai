@@ -13,6 +13,7 @@ class ProjectCreate(BaseModel):
     name: str = Field(max_length=255)
     description: str | None = None
     domain: str | None = Field(default=None, max_length=255)
+    blog_url: str | None = Field(default=None, max_length=500)
     language: str = Field(default="en", max_length=10)
     settings: dict = Field(default_factory=dict)
 
@@ -21,6 +22,7 @@ class ProjectUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=255)
     description: str | None = None
     domain: str | None = None
+    blog_url: str | None = None
     language: str | None = None
     status: str | None = None
     settings: dict | None = None
@@ -32,6 +34,7 @@ class ProjectOut(ORMBase):
     name: str
     description: str | None
     domain: str | None
+    blog_url: str | None
     language: str
     status: str
     settings: dict

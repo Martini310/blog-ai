@@ -42,7 +42,7 @@ structlog==24.4.0
 sentry-sdk[fastapi,celery]==2.19.2
 
 # ---------------------------------------------------------------------------
-# HTTP client (for LLM API calls, webhooks, etc.)
+# HTTP client (for LLM API calls, webhooks, crawling etc.)
 # ---------------------------------------------------------------------------
 httpx==0.28.1
 

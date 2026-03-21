@@ -5,6 +5,8 @@ Responsible for analyzing a project (its name, description, domain) and
 generating an AI context that will be used for topic and article generation.
 """
 import uuid
+import re
+import httpx
 from typing import Any
 
 from sqlalchemy import select
@@ -83,6 +85,11 @@ class ProjectAnalysisService:
                 
                 normalized_result = self._normalize_analysis(result)
                 
+                scraped_articles = []
+                if project.blog_url:
+                    scraped_articles = await self._scrape_blog(project.blog_url)
+                
+                normalized_result["scraped_articles"] = scraped_articles
                 analysis.result = normalized_result
                 analysis.ai_context = normalized_result.get("ai_context", "")
 
@@ -126,6 +133,38 @@ class ProjectAnalysisService:
         analysis.status = "failed"
         analysis.error_message = error_message
         await self._db.flush()
+
+    async def _scrape_blog(self, url: str) -> list[str]:
+        try:
+            from app.core.logging import get_logger
+            logger = get_logger(__name__)
+            logger.info("scraping_blog_started", url=url)
+            
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                html = response.text
+                
+                # Simple extraction using regex for <h1/2/3> tags and <title>
+                titles = []
+                # Extract <title>
+                title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
+                if title_match:
+                    titles.append(title_match.group(1).strip())
+                    
+                # Extract headers
+                header_matches = re.finditer(r'<h[1-3][^>]*>(.*?)</h[1-3]>', html, re.IGNORECASE | re.DOTALL)
+                for match in header_matches:
+                    text = re.sub(r'<[^>]+>', '', match.group(1)).strip()
+                    if text and len(text) > 10 and text not in titles:
+                        titles.append(text)
+                
+                logger.info("scraping_blog_completed", urls_found=len(titles))
+                return titles[:20]  # Return max 20 headers/titles
+        except Exception as e:
+            from app.core.logging import get_logger
+            get_logger(__name__).warning("scraping_blog_failed", url=url, error=str(e))
+            return []
 
     @staticmethod
     def _normalize_analysis(result: LLMResult) -> dict[str, Any]:
