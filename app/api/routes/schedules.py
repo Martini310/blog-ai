@@ -48,14 +48,25 @@ async def create_schedule(
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
+    try:
+        from app.services.scheduler_service import SchedulerService
+        next_run = SchedulerService.calculate_next_run(payload.cron_expression)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid CRON expression: {exc}")
+
     schedule = ContentSchedule(
         project_id=project_id,
         cron_expression=payload.cron_expression,
         config=payload.config,
+        next_run_at=next_run
     )
     db.add(schedule)
     await db.flush()
     logger.info("schedule_created", schedule_id=str(schedule.id), project_id=str(project_id))
+    
+    from app.services.topic_service import TopicService
+    await TopicService(db).project_future_dates(project_id)
+    
     return ContentScheduleOut.model_validate(schedule)
 
 
@@ -81,4 +92,11 @@ async def delete_schedule(
 
     await db.delete(schedule)
     await db.flush()
-    logger.info("schedule_deleted", schedule_id=str(schedule_id), project_id=str(project_id))
+    
+    from sqlalchemy import update
+    from app.models.content import Topic
+    stmt2 = update(Topic).where(Topic.project_id == project_id, Topic.status == "queued").values(scheduled_date=None)
+    await db.execute(stmt2)
+    await db.flush()
+    
+    logger.info("schedule_deleted_and_dates_cleared", schedule_id=str(schedule_id), project_id=str(project_id))

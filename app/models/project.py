@@ -42,13 +42,13 @@ class Project(UUIDMixin, TimestampMixin, Base):
 
     owner: Mapped["User"] = relationship("User", back_populates="projects")
     analysis: Mapped["ProjectAnalysis | None"] = relationship(
-        "ProjectAnalysis", back_populates="project", uselist=False, lazy="select"
+        "ProjectAnalysis", back_populates="project", uselist=False, lazy="select", cascade="all, delete-orphan"
     )
     topics: Mapped[list["Topic"]] = relationship(
-        "Topic", back_populates="project", lazy="select"
+        "Topic", back_populates="project", lazy="select", cascade="all, delete-orphan"
     )
     schedules: Mapped[list["ContentSchedule"]] = relationship(
-        "ContentSchedule", back_populates="project", lazy="select"
+        "ContentSchedule", back_populates="project", lazy="select", cascade="all, delete-orphan"
     )
 
     __table_args__ = (

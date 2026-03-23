@@ -6,7 +6,7 @@ LLM-driven topic generation is triggered via Celery tasks, not here.
 """
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger, set_topic_id
@@ -67,3 +67,64 @@ class TopicService:
         await self._db.flush()
         logger.info("topic_updated", topic_id=str(topic.id), project_id=str(project_id))
         return topic
+
+    async def bulk_update(self, project_id: uuid.UUID, topic_ids: list[uuid.UUID], payload: dict) -> int:
+        if not topic_ids or not payload:
+            return 0
+        stmt = (
+            update(Topic)
+            .where(Topic.project_id == project_id, Topic.id.in_(topic_ids))
+            .values(**payload)
+        )
+        result = await self._db.execute(stmt)
+        await self._db.flush()
+        logger.info("topics_bulk_updated", count=result.rowcount, project_id=str(project_id))
+        
+        if payload.get("status") == "queued":
+            await self.project_future_dates(project_id)
+            
+        return result.rowcount
+
+    async def project_future_dates(self, project_id: uuid.UUID) -> None:
+        """
+        Calculates and assigns scheduled_date for all 'queued' topics in the project,
+        following the project's active ContentSchedule cron.
+        """
+        from datetime import datetime, UTC
+        from app.models.content import ContentSchedule
+        
+        schedule = await self._db.scalar(
+            select(ContentSchedule)
+            .where(
+                ContentSchedule.project_id == project_id, 
+                ContentSchedule.is_active == True
+            )
+        )
+        if not schedule:
+            return
+
+        topics = await self._db.scalars(
+            select(Topic)
+            .where(Topic.project_id == project_id, Topic.status == "queued")
+            .order_by(Topic.priority.desc(), Topic.created_at.asc())
+        )
+        
+        now = datetime.now(UTC)
+        try:
+            import croniter
+            cron = croniter.croniter(schedule.cron_expression, now)
+            
+            for topic in topics:
+                next_run = cron.get_next(datetime)
+                topic.scheduled_date = next_run.date()
+                
+            await self._db.flush()
+            logger.info("project_future_dates_assigned", project_id=str(project_id))
+        except Exception as e:
+            logger.error(f"Failed to project future dates: {e}")
+
+    async def delete(self, topic_id: uuid.UUID, project_id: uuid.UUID) -> None:
+        topic = await self.get_by_id(topic_id, project_id)
+        await self._db.delete(topic)
+        await self._db.flush()
+        logger.info("topic_deleted", topic_id=str(topic_id), project_id=str(project_id))

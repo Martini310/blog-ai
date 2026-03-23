@@ -76,6 +76,24 @@ export default function SingleTopicView() {
           </div>
         </div>
         <div className="flex space-x-3">
+          <button 
+            type="button"
+            onClick={async () => {
+              if (confirm("Are you sure you want to delete this topic?")) {
+                try {
+                  await api.topics.delete(projectId, topicId);
+                  window.location.href = `/projects/${projectId}`;
+                } catch (err: any) {
+                  alert(err.message || "Failed to delete topic.");
+                  console.error(err);
+                }
+              }
+            }}
+            className="py-2.5 px-6 bg-error/10 text-error rounded-full font-bold text-sm hover:bg-error/20 transition-all flex items-center border-none"
+          >
+            <span className="material-symbols-outlined mr-2 text-[18px]">delete</span>
+            Delete Topic
+          </button>
           {topic.status !== "completed" && (
             <button 
               onClick={async () => {

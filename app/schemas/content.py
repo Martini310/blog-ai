@@ -32,6 +32,11 @@ class TopicUpdate(BaseModel):
     topic_metadata: dict | None = None
 
 
+class TopicBulkUpdate(BaseModel):
+    topic_ids: list[UUID]
+    update_data: TopicUpdate
+
+
 class TopicOut(ORMBase):
     id: UUID
     project_id: UUID

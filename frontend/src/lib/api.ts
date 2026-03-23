@@ -49,6 +49,7 @@ export const api = {
     get: (id: string) => fetchWithAuth(`/projects/${id}`),
     create: (data: Record<string, unknown>) => fetchWithAuth("/projects", { method: "POST", body: JSON.stringify(data) }),
     analyze: (id: string) => fetchWithAuth(`/projects/${id}/analyse`, { method: "POST" }),
+    analyzeFromUrl: (id: string, url: string) => fetchWithAuth(`/projects/${id}/analyse-url`, { method: "POST", body: JSON.stringify({ url }) }),
     getAnalysis: (id: string) => fetchWithAuth(`/projects/${id}/analysis`),
     delete: (id: string) => fetchWithAuth(`/projects/${id}`, { method: "DELETE" }),
   },
@@ -56,10 +57,22 @@ export const api = {
     list: (projectId: string) => fetchWithAuth(`/projects/${projectId}/topics`),
     get: (projectId: string, topicId: string) => fetchWithAuth(`/projects/${projectId}/topics/${topicId}`),
     create: (projectId: string, data: Record<string, unknown>) => fetchWithAuth(`/projects/${projectId}/topics`, { method: "POST", body: JSON.stringify(data) }),
+    update: (projectId: string, topicId: string, data: Record<string, unknown>) => fetchWithAuth(`/projects/${projectId}/topics/${topicId}`, { method: "PATCH", body: JSON.stringify(data) }),
+    bulkUpdate: (projectId: string, data: Record<string, unknown>) => fetchWithAuth(`/projects/${projectId}/topics/bulk`, { method: "PATCH", body: JSON.stringify(data) }),
     generate: (projectId: string, topicId: string) => fetchWithAuth(`/projects/${projectId}/topics/${topicId}/generate`, { method: "POST" }),
+    propose: (projectId: string) => fetchWithAuth(`/projects/${projectId}/topics/propose`, { method: "POST" }),
+    delete: (projectId: string, topicId: string) => fetchWithAuth(`/projects/${projectId}/topics/${topicId}`, { method: "DELETE" }),
   },
   articles: {
     list: (projectId: string) => fetchWithAuth(`/projects/${projectId}/articles`),
     get: (projectId: string, articleId: string) => fetchWithAuth(`/projects/${projectId}/articles/${articleId}`),
+  },
+  calendar: {
+    list: () => fetchWithAuth(`/calendar`),
+  },
+  schedules: {
+    list: (projectId: string) => fetchWithAuth(`/projects/${projectId}/schedules`),
+    create: (projectId: string, data: Record<string, unknown>) => fetchWithAuth(`/projects/${projectId}/schedules`, { method: "POST", body: JSON.stringify(data) }),
+    delete: (projectId: string, scheduleId: string) => fetchWithAuth(`/projects/${projectId}/schedules/${scheduleId}`, { method: "DELETE" }),
   }
 };

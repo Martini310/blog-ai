@@ -155,3 +155,34 @@ async def trigger_analysis(
     )
     logger.info("analysis_task_dispatched", task_id=task.id, project_id=str(project_id))
     return {"task_id": task.id, "status": "queued"}
+
+from pydantic import BaseModel
+class AnalyzeUrlPayload(BaseModel):
+    url: str
+
+@router.post("/{project_id}/analyse-url", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_analysis_from_url(
+    project_id: uuid.UUID,
+    payload: AnalyzeUrlPayload,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    """
+    Dispatch an AI analysis task for this project using a specific URL and Tavily search.
+    Returns 202 Accepted – the task runs asynchronously.
+    """
+    try:
+        await ProjectService(db).get_by_id(project_id, current_user.id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    from app.core.logging import get_request_id
+    from app.tasks.content_tasks import analyse_project_from_url
+    task = analyse_project_from_url.delay(
+        project_id=str(project_id),
+        user_id=str(current_user.id),
+        url=payload.url,
+        request_id=get_request_id(),
+    )
+    logger.info("analysis_from_url_task_dispatched", task_id=task.id, project_id=str(project_id), url=payload.url)
+    return {"task_id": task.id, "status": "queued"}

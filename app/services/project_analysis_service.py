@@ -105,6 +105,92 @@ class ProjectAnalysisService:
             "ai_context_length": len(analysis.ai_context),
         }
 
+    async def analyze_project_from_url(
+        self,
+        *,
+        project_id: uuid.UUID,
+        user_id: uuid.UUID,
+        url: str,
+        request_id: str | None,
+    ) -> dict[str, Any]:
+        """Alternative analysis approach that utilizes Tavily to scrape/search the actual URL
+        to build the AI context based on real data."""
+        project = await self._get_project(project_id=project_id, owner_id=user_id)
+        analysis = await self._get_or_create_analysis(project_id=project_id)
+
+        try:
+            await self._set_analysis_status(analysis, "running")
+
+            async with timed_generation_step(
+                self._db,
+                step="project_analysis",
+                task_name="analyse_project_from_url",
+                user_id=user_id,
+                project_id=project_id,
+                request_id=request_id,
+                model_used=self._get_llm().model_name,
+            ) as ctx:
+                # 1. Fetch real-world context using Tavily
+                from app.services.tavily_service import TavilyService
+                tavily = TavilyService()
+                query = f"What is {url}? Provide an overview, target audience, tone of voice, and core topics or products."
+                web_context = await tavily.get_context(query)
+
+                system_prompt = (
+                    "You are an expert SEO strategist and Content Director. "
+                    "Your job is to analyze the user's project details and the provided real web research "
+                    "to generate a strategic AI context for future content generation. "
+                    "Return strict JSON only."
+                )
+                user_prompt = (
+                    f"Analyze the following project using the provided web research:\n"
+                    f"Name: {project.name}\n"
+                    f"Provided URL: {url}\n"
+                    f"Description: {project.description or 'N/A'}\n"
+                    f"Domain: {project.domain or 'N/A'}\n"
+                    f"Target Language: {project.language}\n\n"
+                    f"--- WEB RESEARCH (Tavily) ---\n"
+                    f"{web_context}\n"
+                    f"-----------------------------\n\n"
+                    "Return a JSON object with the following keys:\n"
+                    "- target_audience: string describing the primary audience\n"
+                    "- tone_of_voice: string describing the recommended content tone\n"
+                    "- core_topics: array of 3-5 strings with main content pillars\n"
+                    "- ai_context: a comprehensive, 150-250 word strategic summary "
+                    "combining company background, tone, positioning, and unique advantages. "
+                    "This text will be injected into all future AI prompts to guide "
+                    "article generation. Make it highly compressed and actionable."
+                )
+
+                result = await self._get_llm().generate_json(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=0.3,
+                    max_tokens=800,
+                )
+                ctx["tokens_used"] = result.tokens_used
+                
+                normalized_result = self._normalize_analysis(result)
+                
+                # Try to scrape but don't fail if we can't
+                scraped_articles = await self._scrape_blog(url)
+                
+                normalized_result["scraped_articles"] = scraped_articles
+                analysis.result = normalized_result
+                analysis.ai_context = normalized_result.get("ai_context", "")
+
+            await self._set_analysis_status(analysis, "completed")
+
+        except Exception as exc:
+            await self._mark_analysis_failed(analysis, str(exc))
+            raise
+
+        return {
+            "project_id": str(project_id),
+            "status": "completed",
+            "ai_context_length": len(analysis.ai_context),
+        }
+
     async def _get_project(self, *, project_id: uuid.UUID, owner_id: uuid.UUID) -> Project:
         stmt = select(Project).where(
             Project.id == project_id,

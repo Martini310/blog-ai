@@ -68,7 +68,7 @@ celery_app.conf.update(
 celery_app.conf.beat_schedule = {
     "run-due-content-schedules": {
         "task": "app.tasks.scheduler_tasks.run_due_content_schedules",
-        "schedule": 60.0,    # every 60 seconds
+        "schedule": 3600.0,    # every hour
         "options": {"queue": "scheduler"},
     },
     "cleanup-stale-generation-logs": {

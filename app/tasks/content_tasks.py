@@ -341,3 +341,52 @@ async def _analyse_project_async(
         )
 
     return result
+
+
+@celery_app.task(
+    bind=True,
+    base=LoggedTask,
+    name="app.tasks.content_tasks.analyse_project_from_url",
+    queue="generation",
+    max_retries=2,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+)
+def analyse_project_from_url(
+    self: Task,
+    project_id: str,
+    user_id: str,
+    url: str,
+    request_id: str | None = None,
+) -> dict:
+    """Trigger AI analysis of a project based on real web data gathered for a URL."""
+    set_project_id(project_id)
+    logger.info("analyse_project_from_url_started", project_id=project_id, url=url)
+
+    return asyncio.get_event_loop().run_until_complete(
+        _analyse_project_from_url_async(
+            project_id=uuid.UUID(project_id),
+            user_id=uuid.UUID(user_id),
+            url=url,
+            request_id=request_id,
+        )
+    )
+
+async def _analyse_project_from_url_async(
+    project_id: uuid.UUID,
+    user_id: uuid.UUID,
+    url: str,
+    request_id: str | None,
+) -> dict:
+    from app.services.project_analysis_service import ProjectAnalysisService
+
+    async with get_db() as db:
+        result = await ProjectAnalysisService(db).analyze_project_from_url(
+            project_id=project_id,
+            user_id=user_id,
+            url=url,
+            request_id=request_id,
+        )
+
+    return result

@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.dependencies import CurrentUser, DBSession
 from app.core.logging import get_logger, get_request_id
-from app.schemas.content import TopicCreate, TopicOut, TopicUpdate
+from app.schemas.content import TopicBulkUpdate, TopicCreate, TopicOut, TopicUpdate
 from app.services.project_service import ProjectNotFoundError, ProjectService
 from app.services.topic_service import TopicNotFoundError, TopicService
 from app.tasks.content_tasks import generate_article, propose_topics
@@ -124,6 +124,29 @@ async def trigger_topic_proposals(
     )
     return {"task_id": task.id, "status": "queued"}
 
+@router.patch("/bulk", status_code=status.HTTP_200_OK)
+async def bulk_update_topics(
+    project_id: uuid.UUID,
+    payload: TopicBulkUpdate,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    """
+    Bulk update multiple topics (e.g. accepting proposed topics).
+    """
+    try:
+        await ProjectService(db).get_by_id(project_id, current_user.id)
+        updated_count = await TopicService(db).bulk_update(
+            project_id,
+            payload.topic_ids,
+            payload.update_data.model_dump(exclude_unset=True)
+        )
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    return {"updated_count": updated_count}
+
+
 @router.patch("/{topic_id}", response_model=TopicOut)
 async def update_topic(
     project_id: uuid.UUID,
@@ -146,3 +169,17 @@ async def update_topic(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     return TopicOut.model_validate(topic)
+
+
+@router.delete("/{topic_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_topic(
+    project_id: uuid.UUID,
+    topic_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> None:
+    try:
+        await ProjectService(db).get_by_id(project_id, current_user.id)
+        await TopicService(db).delete(topic_id, project_id)
+    except (ProjectNotFoundError, TopicNotFoundError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

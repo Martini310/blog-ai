@@ -71,7 +71,7 @@ class Topic(UUIDMixin, TimestampMixin, Base):
 
     project: Mapped["Project"] = relationship("Project", back_populates="topics")
     articles: Mapped[list["Article"]] = relationship(
-        "Article", back_populates="topic", lazy="select"
+        "Article", back_populates="topic", lazy="select", cascade="all, delete-orphan"
     )
 
     __table_args__ = (

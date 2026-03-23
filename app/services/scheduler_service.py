@@ -9,11 +9,16 @@ Owns scheduler business logic:
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
+import croniter
+
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_logger
 from app.models.content import ContentSchedule, Topic
 from app.models.project import Project
+
+logger = get_logger(__name__)
 
 ELIGIBLE_TOPIC_STATUSES = ("queued", "scheduled", "pending")
 TOPIC_GENERATION_MARKER_KEY = "topic_generation_requested_at"
@@ -79,8 +84,23 @@ class SchedulerService:
         return await self._db.scalar(stmt)
 
     @staticmethod
+    def calculate_next_run(cron_expression: str, start_time: datetime | None = None) -> datetime:
+        now = start_time or datetime.now(UTC)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=UTC)
+        cron = croniter.croniter(cron_expression, now)
+        next_run = cron.get_next(datetime)
+        if next_run.tzinfo is None:
+            next_run = next_run.replace(tzinfo=UTC)
+        return next_run
+
+    @staticmethod
     def mark_schedule_run(schedule: ContentSchedule, now: datetime) -> None:
         schedule.last_run_at = now
+        try:
+            schedule.next_run_at = SchedulerService.calculate_next_run(schedule.cron_expression, now)
+        except Exception as e:
+            logger.error(f"Failed to calculate next_run_at: {e}")
 
     @staticmethod
     def should_request_topic_generation(schedule: ContentSchedule, now: datetime) -> bool:
